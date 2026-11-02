@@ -1,0 +1,25 @@
+{
+  "name": "bwenv",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "bwenv": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"*.{json,js}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"*.{json,js}\"",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/bun": "1.4.4",
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript-eslint": "8.72.1"
+  }
+}
