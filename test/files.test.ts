@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test'
 import {
+  lstatSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -34,6 +36,17 @@ test('writeSecretFile creates missing parent dirs and leaves mode 0600', () => {
   expect(readFileSync(target, 'utf8')).toBe('A=1\n')
   expect(statSync(target).mode & 0o777).toBe(0o600)
   expect(readdirSync(join(dir, 'a', 'b'))).toEqual(['.env'])
+})
+
+test('writeSecretFile ignores a symlink planted at a guessable temporary name', () => {
+  const dir = tempDir()
+  const victim = join(dir, 'victim')
+  writeFileSync(victim, 'untouched\n')
+  symlinkSync(victim, join(dir, `..env.bwenv-${String(process.pid)}`))
+  writeSecretFile(join(dir, '.env'), 'A=secret\n')
+  expect(readFileSync(victim, 'utf8')).toBe('untouched\n')
+  expect(lstatSync(join(dir, '.env')).isSymbolicLink()).toBe(false)
+  expect(readFileSync(join(dir, '.env'), 'utf8')).toBe('A=secret\n')
 })
 
 test('writeSecretFile tightens the mode of an existing file', () => {

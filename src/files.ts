@@ -1,7 +1,10 @@
+import { randomBytes } from 'node:crypto'
 import {
-  chmodSync,
+  closeSync,
   existsSync,
+  fchmodSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -27,10 +30,16 @@ export function readText(path: string): string | null {
 export function writeSecretFile(path: string, text: string): void {
   const dir = dirname(path)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const temporary = join(dir, `.${basename(path)}.bwenv-${String(process.pid)}`)
+  const suffix = randomBytes(8).toString('hex')
+  const temporary = join(dir, `.${basename(path)}.bwenv-${suffix}`)
   try {
-    writeFileSync(temporary, text, { mode: 0o600 })
-    chmodSync(temporary, 0o600)
+    const fd = openSync(temporary, 'wx', 0o600)
+    try {
+      fchmodSync(fd, 0o600)
+      writeFileSync(fd, text)
+    } finally {
+      closeSync(fd)
+    }
     renameSync(temporary, path)
   } finally {
     rmSync(temporary, { force: true })
