@@ -145,3 +145,21 @@ test('saveManifest round-trips and ends with one newline', () => {
   expect(text.endsWith('\n\n')).toBe(false)
   expect(loadManifest(root).manifest).toEqual(loaded.manifest)
 })
+
+test('parseManifest refuses control characters in how and file', () => {
+  for (const [field, spec] of [
+    ['variables.X.how', { file: '.env', how: 'see \u001b[2Jhere' }],
+    ['variables.X.file', { file: '.env\u0007' }],
+    ['variables.X.how', { file: '.env', how: 'c1 \u009b31m' }],
+  ] as const) {
+    const error = thrown(() =>
+      parseManifest(
+        JSON.stringify({ project: 'p', variables: { X: spec } }),
+        '/p/bwenv.json',
+      ),
+    )
+    expect(error.exitCode).toBe(2)
+    expect(error.message).toContain(field)
+    expect(error.message).not.toContain('\u001b')
+  }
+})

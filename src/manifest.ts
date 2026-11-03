@@ -32,8 +32,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isControl(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f)
+}
+
+function hasControl(text: string): boolean {
+  return Array.from(text).some(isControl)
+}
+
+function printable(text: string): string {
+  return Array.from(text)
+    .map((char) => (isControl(char) ? '?' : char))
+    .join('')
+}
+
 function invalid(path: string, field: string, problem: string): BwenvError {
-  return new BwenvError(`${path}: ${field} ${problem}`, 2)
+  return new BwenvError(printable(`${path}: ${field} ${problem}`), 2)
 }
 
 function rejectUnknownKeys(
@@ -66,13 +81,21 @@ function parseVariable(path: string, name: string, raw: unknown): VariableSpec {
   rejectUnknownKeys(path, raw, VARIABLE_KEYS, `${field}.`)
 
   const { file, how, perEnvironment } = raw
-  if (typeof file !== 'string' || file === '') {
-    throw invalid(path, `${field}.file`, 'must be a non-empty string.')
+  if (typeof file !== 'string' || file === '' || hasControl(file)) {
+    throw invalid(
+      path,
+      `${field}.file`,
+      'must be a non-empty string without control characters.',
+    )
   }
   const spec: VariableSpec = { file }
   if (how !== undefined) {
-    if (typeof how !== 'string') {
-      throw invalid(path, `${field}.how`, 'must be a string.')
+    if (typeof how !== 'string' || hasControl(how)) {
+      throw invalid(
+        path,
+        `${field}.how`,
+        'must be a string without control characters.',
+      )
     }
     spec.how = how
   }
@@ -91,7 +114,7 @@ export function parseManifest(text: string, path: string): Manifest {
     raw = JSON.parse(text)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    throw new BwenvError(`${path} is not valid JSON: ${reason}`, 2)
+    throw new BwenvError(printable(`${path} is not valid JSON: ${reason}`), 2)
   }
   if (!isRecord(raw)) throw invalid(path, 'the top level', 'must be an object.')
   rejectUnknownKeys(path, raw, TOP_LEVEL_KEYS, '')
