@@ -9,7 +9,13 @@ import {
   type VariableSpec,
 } from '../manifest'
 import { obtainValue } from '../value-source'
-import { envSuffix, singleName, targetOf, writeLocal } from '../variable'
+import {
+  assertFromFileMatches,
+  envSuffix,
+  singleName,
+  targetOf,
+  writeLocal,
+} from '../variable'
 
 function newSpec(args: ParsedArgs, name: string): VariableSpec {
   const { file, how, env } = args.flags
@@ -55,6 +61,7 @@ export async function runAdd(ctx: Context, args: ParsedArgs): Promise<number> {
       ? newSpec(args, name)
       : declaredSpec(args, name, declared)
   const target = targetOf(loaded, name, spec, args.flags.env, ctx.home)
+  assertFromFileMatches(target, args.flags.fromFile, ctx.statePath)
   const project = loaded.manifest.project
 
   const vault = await openVault({

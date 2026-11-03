@@ -88,3 +88,37 @@ test('update refuses an agent', async () => {
   expect(result.code).toBe(1)
   expect(readVault(sandbox).calls).toEqual([])
 })
+
+test('--from-file never sends one environment value into another environment', async () => {
+  const sandbox = makeSandbox({
+    project: 'p',
+    variables: { SEG: { file: '.dev.vars', perEnvironment: true } },
+  })
+  seedItems(sandbox, 'p', {
+    'p/staging/SEG': 'stagx1',
+    'p/production/SEG': 'prodx1',
+  })
+  expect((await runCli(sandbox, ['sync', '--env', 'staging'])).code).toBe(0)
+
+  const update = await runCli(sandbox, [
+    'update',
+    'SEG',
+    '--env',
+    'production',
+    '--from-file',
+  ])
+  expect(update.code).toBe(1)
+  expect(update.stderr).toContain('holds staging values')
+  expect(update.stderr).toContain('bwenv sync --env production')
+  expect(storedValue(sandbox, 'p/production/SEG')).toBe('prodx1')
+
+  const add = await runCli(sandbox, [
+    'add',
+    'SEG',
+    '--env',
+    'dev',
+    '--from-file',
+  ])
+  expect(add.code).toBe(1)
+  expect(storedValue(sandbox, 'p/dev/SEG')).toBeUndefined()
+})

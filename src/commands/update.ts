@@ -4,13 +4,19 @@ import type { Context } from '../context'
 import { BwenvError } from '../errors'
 import { folderName } from '../manifest'
 import { obtainValue } from '../value-source'
-import { declaredTarget, envSuffix, writeLocal } from '../variable'
+import {
+  assertFromFileMatches,
+  declaredTarget,
+  envSuffix,
+  writeLocal,
+} from '../variable'
 
 export async function runUpdate(
   ctx: Context,
   args: ParsedArgs,
 ): Promise<number> {
   const target = declaredTarget(ctx.cwd, ctx.home, args)
+  assertFromFileMatches(target, args.flags.fromFile, ctx.statePath)
   const { name, spec } = target
   const project = target.loaded.manifest.project
 

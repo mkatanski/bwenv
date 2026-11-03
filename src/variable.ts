@@ -120,6 +120,22 @@ export function writeLocal(
   return null
 }
 
+export function assertFromFileMatches(
+  target: Target,
+  fromFile: boolean,
+  statePath: string,
+): void {
+  const { loaded, env, path, spec } = target
+  if (!fromFile || env === null) return
+  const state = loadState(statePath)
+  const defaultEnv = defaultEnvironment(loaded.manifest)
+  if (fileHoldsEnvironment(state, path, env, defaultEnv)) return
+  const current = state[path]?.environment ?? defaultEnv
+  throw new BwenvError(
+    `${spec.file} holds ${current} values, so --from-file cannot send it as ${env}. Switch first: bwenv sync --env ${env}`,
+  )
+}
+
 export function envSuffix(target: Target): string {
   return target.env === null ? '' : ` --env ${target.env}`
 }
