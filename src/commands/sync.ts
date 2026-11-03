@@ -13,11 +13,12 @@ import {
 } from '../manifest'
 import { loadState, recordValues, saveState, type State } from '../state'
 import { fileFlag } from '../shell'
-import { decideSync } from '../sync-plan'
+import { decideSync, type SyncOutcome } from '../sync-plan'
 
 interface SyncRun {
   project: string
   env: string
+  defaultEnv: string
   envFlag: string
   force: boolean
   vault: Vault
@@ -40,8 +41,64 @@ function missingRow(name: string, spec: VariableSpec, run: SyncRun): string {
   return `${where}${how}. Then: bwenv add ${name}${envFlag}`
 }
 
-function conflictRow(name: string, run: SyncRun): string {
-  return `conflict — changed by hand since the last sync. Keep yours: bwenv update ${name} --from-file${run.envFlag} · Take Bitwarden's: bwenv sync${run.envFlag} --force`
+function conflictRow(
+  name: string,
+  spec: VariableSpec,
+  run: SyncRun,
+  fileEnv: string,
+): string {
+  const keepEnv =
+    spec.perEnvironment === true && fileEnv !== run.defaultEnv
+      ? ` --env ${fileEnv}`
+      : ''
+  return `conflict — changed by hand since the last sync. Keep yours: bwenv update ${name} --from-file${keepEnv} · Take Bitwarden's: bwenv sync${run.envFlag} --force`
+}
+
+type Outcome = SyncOutcome | 'unwritable'
+
+interface Planned {
+  name: string
+  spec: VariableSpec
+  value: string | null
+  outcome: Outcome
+}
+
+function plan(
+  group: FileGroup,
+  run: SyncRun,
+  present: Map<string, string>,
+): Planned[] {
+  const recorded = run.state[group.path]?.values ?? {}
+  return group.variables.map(([name, spec]) => {
+    const item = run.vault.findItem(
+      run.items,
+      itemName(
+        run.project,
+        name,
+        spec.perEnvironment === true ? run.env : null,
+      ),
+    )
+    const value = item?.value ?? null
+    const outcome: Outcome =
+      value !== null && !VALUE_PATTERN.test(value)
+        ? 'unwritable'
+        : decideSync({
+            local: present.get(name) ?? null,
+            vault: value,
+            lastWrittenHash: recorded[name] ?? null,
+            force: run.force,
+          })
+    return { name, spec, value, outcome }
+  })
+}
+
+function blocksSwitch(planned: Planned): boolean {
+  return (
+    planned.spec.perEnvironment === true &&
+    (planned.outcome === 'missing' ||
+      planned.outcome === 'conflict' ||
+      planned.outcome === 'unwritable')
+  )
 }
 
 function syncGroup(group: FileGroup, run: SyncRun): GroupResult {
@@ -55,59 +112,47 @@ function syncGroup(group: FileGroup, run: SyncRun): GroupResult {
   }
 
   const original = readText(group.path) ?? ''
-  const present = parseEnv(original)
-  const recorded = run.state[group.path]?.values ?? {}
+  const planned = plan(group, run, parseEnv(original))
+  const fileEnv = run.state[group.path]?.environment ?? run.defaultEnv
+  const blocked = planned.some(blocksSwitch)
   const landed: Record<string, string> = {}
-  const width = Math.max(...group.variables.map(([name]) => name.length))
+  const width = Math.max(...planned.map(({ name }) => name.length))
   let text = original
   let attention = false
-  let complete = true
 
-  for (const [name, spec] of group.variables) {
-    const perEnvironment = spec.perEnvironment === true
-    const item = run.vault.findItem(
-      run.items,
-      itemName(run.project, name, perEnvironment ? run.env : null),
-    )
-    const value = item?.value ?? null
-    const outcome = decideSync({
-      local: present.get(name) ?? null,
-      vault: value,
-      lastWrittenHash: recorded[name] ?? null,
-      force: run.force,
-    })
+  for (const { name, spec, value, outcome } of planned) {
     let row: string
-    if (value !== null && outcome !== 'missing' && !VALUE_PATTERN.test(value)) {
+    if (outcome === 'unwritable') {
       row =
         'stored in Bitwarden with characters bwenv cannot write unquoted. Fix the item in Bitwarden.'
       attention = true
-      if (perEnvironment) complete = false
     } else if (outcome === 'write' && value !== null) {
-      text = setKey(text, name, value)
-      landed[name] = value
-      row = 'written'
+      if (blocked && spec.perEnvironment === true) {
+        row = `held back — ${group.file} switches to ${run.env} only when every per-environment value can land`
+      } else {
+        text = setKey(text, name, value)
+        landed[name] = value
+        row = 'written'
+      }
     } else if (outcome === 'unchanged' && value !== null) {
       landed[name] = value
       row = 'unchanged'
     } else if (outcome === 'conflict') {
-      row = conflictRow(name, run)
+      row = conflictRow(name, spec, run, fileEnv)
       attention = true
-      if (perEnvironment) complete = false
     } else {
       row = missingRow(name, spec, run)
       attention = true
-      if (perEnvironment) complete = false
     }
     lines.push(`  ${name.padEnd(width)}  ${row}`)
   }
 
   if (text !== original) writeSecretFile(group.path, text)
-  const previous = run.state[group.path]?.environment
   recordValues(
     run.state,
     group.path,
     run.project,
-    complete ? run.env : (previous ?? run.env),
+    blocked ? fileEnv : run.env,
     landed,
   )
   return { lines, attention }
@@ -146,6 +191,7 @@ export async function runSync(ctx: Context, args: ParsedArgs): Promise<number> {
   const run: SyncRun = {
     project,
     env,
+    defaultEnv: defaultEnvironment(loaded.manifest),
     envFlag: args.flags.env === undefined ? '' : ` --env ${env}`,
     force: args.flags.force,
     vault,

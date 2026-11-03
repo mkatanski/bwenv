@@ -254,3 +254,71 @@ test('the command suggested to the owner never echoes raw --file text', async ()
     expect(result.stderr).not.toContain('touch pwned')
   }
 })
+
+const SWITCH_MANIFEST = {
+  project: 'p',
+  variables: {
+    A: { file: '.dev.vars', perEnvironment: true },
+    B: { file: '.dev.vars', perEnvironment: true },
+  },
+}
+
+test('a switch is all or nothing for per-environment values', async () => {
+  const sandbox = makeSandbox(SWITCH_MANIFEST)
+  seedItems(sandbox, 'p', {
+    'p/local/A': 'alocalx1',
+    'p/local/B': 'blocalx1',
+    'p/staging/A': 'astagx1',
+  })
+  expect((await runCli(sandbox, ['sync'])).code).toBe(0)
+  const partial = await runCli(sandbox, ['sync', '--env', 'staging'])
+  expect(partial.code).toBe(1)
+  expect(devVars(sandbox)).toBe('A=alocalx1\nB=blocalx1\n')
+  expect(onlyState(sandbox).environment).toBe('local')
+
+  expect((await runCli(sandbox, ['update', 'A', '--from-file'])).code).toBe(0)
+  const vault = readVault(sandbox)
+  const localA = vault.items.find((item) => item.name === 'p/local/A')
+  expect(localA?.login).toMatchObject({ password: 'alocalx1' })
+})
+
+test('a first switch with no state records the default environment', async () => {
+  const sandbox = makeSandbox(SWITCH_MANIFEST)
+  writeFileSync(join(sandbox.project, '.dev.vars'), 'A=handax1\nB=handbx1\n')
+  seedItems(sandbox, 'p', { 'p/staging/A': 'astagx1' })
+  expect((await runCli(sandbox, ['sync', '--env', 'staging'])).code).toBe(1)
+  expect(onlyState(sandbox).environment).toBe('local')
+
+  const add = await runCli(sandbox, [
+    'add',
+    'B',
+    '--env',
+    'staging',
+    '--from-file',
+  ])
+  expect(add.code).toBe(1)
+  expect(
+    readVault(sandbox).items.some((item) => item.name === 'p/staging/B'),
+  ).toBe(false)
+})
+
+test('a conflict during a switch points the update at the environment the file holds', async () => {
+  const sandbox = makeSandbox(SWITCH_MANIFEST)
+  seedItems(sandbox, 'p', {
+    'p/local/A': 'alocalx1',
+    'p/local/B': 'blocalx1',
+    'p/staging/A': 'astagx1',
+    'p/staging/B': 'bstagx1',
+  })
+  await runCli(sandbox, ['sync'])
+  writeFileSync(join(sandbox.project, '.dev.vars'), 'A=handax1\nB=blocalx1\n')
+  const result = await runCli(sandbox, ['sync', '--env', 'staging'])
+  expect(result.code).toBe(1)
+  expect(result.stdout).toContain('Keep yours: bwenv update A --from-file ·')
+  expect(result.stdout).toContain('bwenv sync --env staging --force')
+  expect(devVars(sandbox)).toBe('A=handax1\nB=blocalx1\n')
+
+  expect((await runCli(sandbox, ['update', 'A', '--from-file'])).code).toBe(0)
+  expect((await runCli(sandbox, ['sync', '--env', 'staging'])).code).toBe(0)
+  expect(devVars(sandbox)).toBe('A=astagx1\nB=bstagx1\n')
+})
