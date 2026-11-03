@@ -104,7 +104,7 @@ export async function runList(ctx: Context, args: ParsedArgs): Promise<number> {
   }
   const loaded = loadManifest(ctx.cwd)
   const state = loadState(ctx.statePath)
-  const groups = groupByFile(loaded, ctx.home, args.flags.file)
+  const groups = groupByFile(loaded, ctx, args.flags.file)
   const lookup = args.flags.vault
     ? await vaultLookup(ctx, args, loaded, state, groups)
     : null

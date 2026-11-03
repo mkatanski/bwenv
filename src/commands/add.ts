@@ -3,9 +3,12 @@ import { openVault } from '../bitwarden'
 import type { Context } from '../context'
 import { BwenvError } from '../errors'
 import {
+  fileFromCli,
   folderName,
   loadManifest,
+  resolveFile,
   saveManifest,
+  type LoadedManifest,
   type VariableSpec,
 } from '../manifest'
 import { obtainValue } from '../value-source'
@@ -17,7 +20,12 @@ import {
   writeLocal,
 } from '../variable'
 
-function newSpec(args: ParsedArgs, name: string): VariableSpec {
+function newSpec(
+  args: ParsedArgs,
+  name: string,
+  loaded: LoadedManifest,
+  ctx: Context,
+): VariableSpec {
   const { file, how, env } = args.flags
   if (file === undefined) {
     throw new BwenvError(
@@ -25,7 +33,9 @@ function newSpec(args: ParsedArgs, name: string): VariableSpec {
       2,
     )
   }
-  const spec: VariableSpec = { file }
+  const spec: VariableSpec = {
+    file: fileFromCli(loaded, file, ctx.cwd, ctx.home).label,
+  }
   if (how !== undefined) spec.how = how
   if (env !== undefined) spec.perEnvironment = true
   return spec
@@ -35,9 +45,15 @@ function declaredSpec(
   args: ParsedArgs,
   name: string,
   declared: VariableSpec,
+  loaded: LoadedManifest,
+  ctx: Context,
 ): VariableSpec {
   const { file, how } = args.flags
-  if (file !== undefined && file !== declared.file) {
+  if (
+    file !== undefined &&
+    fileFromCli(loaded, file, ctx.cwd, ctx.home).path !==
+      resolveFile(loaded, declared.file, ctx.home)
+  ) {
     throw new BwenvError(
       `${name} is declared for ${declared.file} in bwenv.json, not ${file}.`,
       2,
@@ -58,8 +74,8 @@ export async function runAdd(ctx: Context, args: ParsedArgs): Promise<number> {
   const declared = loaded.manifest.variables[name]
   const spec =
     declared === undefined
-      ? newSpec(args, name)
-      : declaredSpec(args, name, declared)
+      ? newSpec(args, name, loaded, ctx)
+      : declaredSpec(args, name, declared, loaded, ctx)
   const target = targetOf(loaded, name, spec, args.flags.env, ctx.home)
   assertFromFileMatches(target, args.flags.fromFile, ctx.statePath)
   const project = loaded.manifest.project

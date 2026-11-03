@@ -116,3 +116,13 @@ test('list --vault refuses an agent', async () => {
   expect(result.code).toBe(1)
   expect(readVault(sandbox).calls).toEqual([])
 })
+
+test('list --file is relative to where you stand', async () => {
+  const sandbox = listSandbox()
+  mkdirSync(join(sandbox.project, 'sub'))
+  const result = await runCli(sandbox, ['list', '--file', '../.dev.vars'], {
+    cwd: join(sandbox.project, 'sub'),
+  })
+  expect(result.code).toBe(0)
+  expect(result.stdout).toContain('  A  set')
+})

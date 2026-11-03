@@ -1,5 +1,11 @@
 import { beforeAll, expect, test } from 'bun:test'
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -204,4 +210,33 @@ test('agents are refused before any prompt', async () => {
   expect(result.stderr).toContain('does not open the vault for an agent')
   expect(readVault(sandbox).calls).toEqual([])
   expect(manifestOf(sandbox)).toEqual({ project: 'p', variables: {} })
+})
+
+test('add --file is relative to where you stand, stored relative to bwenv.json', async () => {
+  const sandbox = makeSandbox({ project: 'p', variables: {} })
+  mkdirSync(join(sandbox.project, 'sub'))
+  const result = await runCli(sandbox, ['add', 'X', '--file', '.dev.vars'], {
+    cwd: join(sandbox.project, 'sub'),
+    stdin: 'xvalx1',
+  })
+  expect(result.code).toBe(0)
+  expect(manifestOf(sandbox)).toEqual({
+    project: 'p',
+    variables: { X: { file: 'sub/.dev.vars' } },
+  })
+  expect(readFileSync(join(sandbox.project, 'sub', '.dev.vars'), 'utf8')).toBe(
+    'X=xvalx1\n',
+  )
+  expect(existsSync(join(sandbox.project, '.dev.vars'))).toBe(false)
+})
+
+test('add --file accepts another spelling of the declared file', async () => {
+  const sandbox = makeSandbox({
+    project: 'p',
+    variables: { A: { file: '.dev.vars' } },
+  })
+  const result = await runCli(sandbox, ['add', 'A', '--file', './.dev.vars'], {
+    stdin: 'avalx1',
+  })
+  expect(result.code).toBe(0)
 })

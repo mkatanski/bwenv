@@ -1,5 +1,10 @@
 import { BwenvError } from './errors'
-import { resolveFile, type LoadedManifest, type VariableSpec } from './manifest'
+import {
+  fileFromCli,
+  resolveFile,
+  type LoadedManifest,
+  type VariableSpec,
+} from './manifest'
 
 export interface FileGroup {
   file: string
@@ -9,9 +14,10 @@ export interface FileGroup {
 
 export function groupByFile(
   loaded: LoadedManifest,
-  home: string,
+  where: { cwd: string; home: string },
   only?: string,
 ): FileGroup[] {
+  const { cwd, home } = where
   const groups = new Map<string, FileGroup>()
   for (const [name, spec] of Object.entries(loaded.manifest.variables)) {
     const path = resolveFile(loaded, spec.file, home)
@@ -22,7 +28,7 @@ export function groupByFile(
   const all = [...groups.values()]
   if (only === undefined) return all
 
-  const wanted = resolveFile(loaded, only, home)
+  const wanted = fileFromCli(loaded, only, cwd, home).path
   const selected = all.filter((group) => group.path === wanted)
   if (selected.length === 0) {
     throw new BwenvError(

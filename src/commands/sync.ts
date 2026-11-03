@@ -179,7 +179,7 @@ export async function runSync(ctx: Context, args: ParsedArgs): Promise<number> {
       2,
     )
   }
-  const groups = groupByFile(loaded, ctx.home, args.flags.file)
+  const groups = groupByFile(loaded, ctx, args.flags.file)
   const vault = await openVault({
     env: ctx.env,
     isTTY: ctx.isTTY,

@@ -230,6 +230,36 @@ function realPathOfNearest(path: string): string {
   return join(realpathSync(existing), relative(existing, path))
 }
 
+export function fileFromCli(
+  loaded: LoadedManifest,
+  cliPath: string,
+  cwd: string,
+  home: string,
+): { label: string; path: string } {
+  const expanded =
+    cliPath === '~'
+      ? home
+      : cliPath.startsWith('~/')
+        ? join(home, cliPath.slice(2))
+        : cliPath
+  const absolute = resolve(cwd, expanded)
+  let label: string
+  if (isInside(loaded.dir, absolute)) {
+    label = relative(loaded.dir, absolute).split(sep).join('/')
+  } else if (isInside(home, absolute)) {
+    label = `~/${relative(home, absolute).split(sep).join('/')}`
+  } else {
+    throw new BwenvError(
+      `${cliPath} is outside both the project (${loaded.dir}) and the home directory.`,
+      2,
+    )
+  }
+  if (label === '' || label === '~/') {
+    throw new BwenvError(`${cliPath} is a directory, not a file.`, 2)
+  }
+  return { label, path: resolveFile(loaded, label, home) }
+}
+
 export function itemName(
   project: string,
   name: string,
