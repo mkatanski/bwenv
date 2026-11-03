@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 import { parseArgs, USAGE, type ParsedArgs } from './args'
+import { runAdd } from './commands/add'
 import { runList } from './commands/list'
 import { runSync } from './commands/sync'
+import { runUpdate } from './commands/update'
 import { contextFromProcess, type Context } from './context'
 import { BwenvError } from './errors'
 
@@ -18,8 +20,8 @@ function help(ctx: Context): Promise<number> {
 
 const HANDLERS = new Map<string, Handler>([
   ['sync', runSync],
-  ['add', notImplemented],
-  ['update', notImplemented],
+  ['add', runAdd],
+  ['update', runUpdate],
   ['rm', notImplemented],
   ['list', runList],
   ['is-secret', notImplemented],
