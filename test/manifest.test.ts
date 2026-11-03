@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -162,4 +168,28 @@ test('parseManifest refuses control characters in how and file', () => {
     expect(error.message).toContain(field)
     expect(error.message).not.toContain('\u001b')
   }
+})
+
+test('resolveFile keeps relative paths inside the project and ~ paths inside home', () => {
+  const root = tempDir()
+  writeFileSync(join(root, 'bwenv.json'), VALID)
+  const elsewhere = tempDir()
+  symlinkSync(elsewhere, join(root, 'link'))
+  const loaded = loadManifest(root)
+  for (const file of [
+    '../outside/.env',
+    'sub/../../x',
+    'link/.env',
+    '~/../x',
+  ]) {
+    const error = thrown(() => resolveFile(loaded, file, '/home/me'))
+    expect(error.exitCode).toBe(2)
+    expect(error.message).toContain(file)
+  }
+  expect(resolveFile(loaded, 'sub/../.env', '/home/me')).toBe(
+    join(root, '.env'),
+  )
+  expect(resolveFile(loaded, '..dotted', '/home/me')).toBe(
+    join(root, '..dotted'),
+  )
 })

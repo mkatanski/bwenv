@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { ENV_PATTERN, NAME_PATTERN } from './dotenv'
 import { BwenvError } from './errors'
@@ -189,14 +189,45 @@ export function resolveFile(
   file: string,
   home: string,
 ): string {
-  if (file.startsWith('~/')) return join(home, file.slice(2))
+  if (file.startsWith('~/')) {
+    const inHome = resolve(home, file.slice(2))
+    if (!isInside(home, inHome)) {
+      throw new BwenvError(`${file} leaves the home directory.`, 2)
+    }
+    return inHome
+  }
   if (isAbsolute(file)) {
     throw new BwenvError(
       `${file} is an absolute path, which ties ${MANIFEST_NAME} to one machine. Use ~/… or a path relative to ${loaded.path}.`,
       2,
     )
   }
-  return resolve(loaded.dir, file)
+  const inProject = resolve(loaded.dir, file)
+  if (
+    !isInside(loaded.dir, inProject) ||
+    !isInside(realpathSync(loaded.dir), realPathOfNearest(inProject))
+  ) {
+    throw new BwenvError(
+      `${file} leaves the directory of ${loaded.path}. A project file must stay inside the project; use ~/… for a file in the home directory.`,
+      2,
+    )
+  }
+  return inProject
+}
+
+function isInside(parent: string, child: string): boolean {
+  const path = relative(parent, child)
+  return path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path)
+}
+
+function realPathOfNearest(path: string): string {
+  let existing = path
+  while (!existsSync(existing)) {
+    const parent = dirname(existing)
+    if (parent === existing) break
+    existing = parent
+  }
+  return join(realpathSync(existing), relative(existing, path))
 }
 
 export function itemName(
