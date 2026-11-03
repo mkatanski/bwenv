@@ -236,3 +236,38 @@ describe('recursive searches', () => {
     expect(judgeBash('grep -rn API_KEY .', ctx)).toContain('git grep')
   })
 })
+
+describe('search parsing fails closed', () => {
+  for (const command of [
+    'grep -eX .env',
+    'grep -f .env README.md',
+    'grep --file=.env README.md',
+    'grep -f.env README.md',
+    'rg -f .env src',
+    'ag -f .env',
+  ]) {
+    test(`denies ${command}`, () => {
+      expect(judgeBash(command, ctx)).not.toBeNull()
+    })
+  }
+
+  test('a recursive grep finds a secret file several levels down', () => {
+    mkdirSync(join(ctx.cwd, 'pkg', 'deep'), { recursive: true })
+    writeFileSync(join(ctx.cwd, 'pkg', 'deep', '.env'), 'X=1\n')
+    expect(judgeBash('grep -rn X pkg', ctx)).not.toBeNull()
+    expect(judgeBash('grep -rn X src', ctx)).toBeNull()
+  })
+
+  test('a plain rg is denied over a declared secret file that is not hidden', () => {
+    const sandbox = makeSandbox({
+      project: 'p',
+      variables: { K: { file: 'config/keys.txt' } },
+    })
+    mkdirSync(join(sandbox.project, 'config'))
+    writeFileSync(join(sandbox.project, 'config', 'keys.txt'), 'K=1\n')
+    const local = { ...ctx, cwd: sandbox.project }
+    expect(judgeBash('rg X config', local)).not.toBeNull()
+    expect(judgeBash('rg X .', local)).not.toBeNull()
+    expect(judgeBash('rg X src', local)).toBeNull()
+  })
+})

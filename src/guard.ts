@@ -1,4 +1,10 @@
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  type Dirent,
+} from 'node:fs'
 import {
   basename,
   dirname,
@@ -233,41 +239,25 @@ function secretDenial(path: string): string {
 
 const GREP_FAMILY = new Set(['grep', 'egrep', 'fgrep', 'zgrep', 'rgrep'])
 const RIPGREPS = new Set(['rg', 'ag'])
-const PATTERN_OPTIONS = new Set(['-e', '-f', '--regexp', '--file'])
-const GREP_VALUE_OPTIONS = new Set([
-  '-e',
-  '-f',
-  '-m',
-  '-A',
-  '-B',
-  '-C',
-  '-d',
-  '-D',
-])
-const RIPGREP_VALUE_OPTIONS = new Set([
-  '-e',
-  '-f',
-  '-m',
-  '-A',
-  '-B',
-  '-C',
-  '-g',
-  '-t',
-  '-T',
-  '-r',
-  '-M',
-  '-j',
-  '-G',
-])
 const UNRESTRICTED = new Set([
   '--hidden',
   '--no-ignore',
   '--unrestricted',
   '--skip-vcs-ignores',
 ])
+const PATTERN_VALUE = new Set(['-e', '--regexp'])
+const FILE_VALUE = new Set(['-f', '--file'])
+const OTHER_VALUE: Record<string, ReadonlySet<string>> = {
+  grep: new Set(['-m', '-A', '-B', '-C', '-d', '-D']),
+  rg: new Set(['-m', '-A', '-B', '-C', '-g', '-t', '-T', '-r', '-M', '-j']),
+}
+const WALK_SKIP = new Set(['node_modules', '.git'])
+const WALK_DEPTH = 6
+const WALK_LIMIT = 5000
 
 interface Search {
-  operands: string[]
+  checked: string[]
+  dirs: string[]
   readsEverything: boolean
 }
 
@@ -275,12 +265,27 @@ function isShortCluster(arg: string): boolean {
   return /^-[A-Za-z.]+$/.test(arg)
 }
 
+function readsHiddenAndIgnored(command: string, option: string): boolean {
+  if (GREP_FAMILY.has(command)) {
+    return (
+      option === '--recursive' ||
+      option === '--dereference-recursive' ||
+      (isShortCluster(option) && /[rR]/.test(option))
+    )
+  }
+  return (
+    UNRESTRICTED.has(option) || (isShortCluster(option) && /[uU.]/.test(option))
+  )
+}
+
 function parseSearch(command: string, args: string[]): Search {
-  const grep = GREP_FAMILY.has(command)
-  const valueOptions = grep ? GREP_VALUE_OPTIONS : RIPGREP_VALUE_OPTIONS
+  const modelled = command !== 'ag'
+  const otherValue =
+    OTHER_VALUE[GREP_FAMILY.has(command) ? 'grep' : 'rg'] ?? new Set<string>()
   let readsEverything = command === 'rgrep'
-  let patternGiven = false
+  let patternInOption = !modelled
   const positionals: string[] = []
+  const checked: string[] = []
   for (let index = 0; index < args.length; index++) {
     const arg = args[index] ?? ''
     if (arg === '--') {
@@ -291,28 +296,31 @@ function parseSearch(command: string, args: string[]): Search {
       positionals.push(arg)
       continue
     }
-    const option = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg
-    if (PATTERN_OPTIONS.has(option)) patternGiven = true
-    if (grep) {
-      if (
-        option === '--recursive' ||
-        option === '--dereference-recursive' ||
-        (isShortCluster(arg) && /[rR]/.test(arg))
-      ) {
-        readsEverything = true
+    const equals = arg.indexOf('=')
+    const option = equals === -1 ? arg : arg.slice(0, equals)
+    if (readsHiddenAndIgnored(command, option)) readsEverything = true
+    if (!modelled) continue
+    if (equals !== -1) {
+      if (!PATTERN_VALUE.has(option)) checked.push(arg.slice(equals + 1))
+      if (PATTERN_VALUE.has(option) || FILE_VALUE.has(option)) {
+        patternInOption = true
       }
-    } else if (
-      UNRESTRICTED.has(option) ||
-      (isShortCluster(arg) && /[uU.]/.test(arg))
-    ) {
-      readsEverything = true
+      continue
     }
-    if (valueOptions.has(arg)) index++
+    if (PATTERN_VALUE.has(arg)) {
+      patternInOption = true
+      index++
+    } else if (FILE_VALUE.has(arg) || otherValue.has(arg)) {
+      if (FILE_VALUE.has(arg)) patternInOption = true
+      checked.push(args[index + 1] ?? '')
+      index++
+    } else if (!arg.startsWith('--')) {
+      if (/[ef]/.test(arg)) patternInOption = true
+      checked.push(arg.slice(2))
+    }
   }
-  return {
-    operands: patternGiven ? positionals : positionals.slice(1),
-    readsEverything,
-  }
+  const dirs = patternInOption ? positionals : positionals.slice(1)
+  return { checked: [...dirs, ...checked], dirs, readsEverything }
 }
 
 function isInsideDir(parent: string, child: string): boolean {
@@ -325,16 +333,52 @@ function isInsideDir(parent: string, child: string): boolean {
   )
 }
 
-function dirHoldsSecrets(dir: string, ctx: GuardContext): boolean {
+function isVisibleFrom(parent: string, child: string): boolean {
+  return relative(parent, child)
+    .split(sep)
+    .every((segment) => !segment.startsWith('.'))
+}
+
+function treeHasBuiltInSecret(root: string): boolean {
+  let seen = 0
+  const stack: [string, number][] = [[root, 0]]
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [dir, depth] = next
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      seen++
+      if (seen > WALK_LIMIT || isBuiltInSecretName(entry.name)) return true
+      if (
+        entry.isDirectory() &&
+        !WALK_SKIP.has(entry.name) &&
+        depth < WALK_DEPTH
+      ) {
+        stack.push([join(dir, entry.name), depth + 1])
+      }
+    }
+  }
+  return false
+}
+
+function dirHoldsSecrets(
+  dir: string,
+  ctx: GuardContext,
+  everything: boolean,
+): boolean {
   const absolute = canonical(isAbsolute(dir) ? dir : resolve(ctx.cwd, dir))
   if (!existsSync(absolute) || !statSync(absolute).isDirectory()) return false
   const known = [
     ...stateFiles(ctx.statePath),
     ...manifestFiles(findManifest(ctx.cwd), ctx.home),
     ...manifestFiles(findManifest(absolute), ctx.home),
-  ]
-  if (known.some((path) => isInsideDir(absolute, path))) return true
-  return readdirSync(absolute).some(isBuiltInSecretName)
+  ].filter((path) => isInsideDir(absolute, path))
+  if (!everything) return known.some((path) => isVisibleFrom(absolute, path))
+  return known.length > 0 || treeHasBuiltInSecret(absolute)
 }
 
 function judgeSearch(
@@ -342,15 +386,16 @@ function judgeSearch(
   args: string[],
   ctx: GuardContext,
 ): string | null {
-  const { operands, readsEverything } = parseSearch(command, args)
-  for (const operand of operands) {
-    if (isSecretPath(expandWord(operand, ctx.home), ctx)) {
-      return secretDenial(operand)
+  const { checked, dirs, readsEverything } = parseSearch(command, args)
+  for (const word of checked) {
+    if (word !== '' && isSecretPath(expandWord(word, ctx.home), ctx)) {
+      return secretDenial(word)
     }
   }
-  if (!readsEverything) return null
-  for (const dir of operands.length === 0 ? ['.'] : operands) {
-    if (dirHoldsSecrets(expandWord(dir, ctx.home), ctx)) {
+  const recursive = readsEverything || RIPGREPS.has(command)
+  if (!recursive) return null
+  for (const dir of dirs.length === 0 ? ['.'] : dirs) {
+    if (dirHoldsSecrets(expandWord(dir, ctx.home), ctx, readsEverything)) {
       return `${dir} holds secret files and this search would print them. Use: git grep (it skips ignored files), or bwenv list`
     }
   }
