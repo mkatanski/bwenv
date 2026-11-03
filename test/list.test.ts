@@ -7,6 +7,7 @@ import {
   makeSandbox,
   readVault,
   runCli,
+  seedItems,
   type Sandbox,
 } from './helpers'
 
@@ -79,4 +80,39 @@ test('help prints usage and an unknown command exits 2', async () => {
   const bogus = await runCli(sandbox, ['frobnicate'])
   expect(bogus.code).toBe(2)
   expect(bogus.stderr).toContain('Usage:')
+})
+
+test('list --vault shows same, differs, not in vault and in vault without values', async () => {
+  const sandbox = makeSandbox({
+    project: 'p',
+    variables: {
+      A: { file: '.dev.vars' },
+      B: { file: '.dev.vars' },
+      C: { file: '.dev.vars' },
+      D: { file: '.dev.vars' },
+    },
+  })
+  writeFileSync(
+    join(sandbox.project, '.dev.vars'),
+    'A=samex1\nB=localx1\nC=onlyx1\n',
+  )
+  seedItems(sandbox, 'p', { 'p/A': 'samex1', 'p/B': 'vaultx1', 'p/D': 'dx1' })
+  const result = await runCli(sandbox, ['list', '--vault'])
+  expect(result.code).toBe(0)
+  expect(result.stdout).toContain('  A  set · same')
+  expect(result.stdout).toContain('  B  set · differs')
+  expect(result.stdout).toContain('  C  set · not in vault')
+  expect(result.stdout).toContain('  D  missing · in vault')
+  for (const value of ['samex1', 'localx1', 'vaultx1', 'onlyx1', 'dx1']) {
+    expect(result.stdout).not.toContain(value)
+  }
+})
+
+test('list --vault refuses an agent', async () => {
+  const sandbox = listSandbox()
+  const result = await runCli(sandbox, ['list', '--vault'], {
+    env: { CLAUDECODE: '1' },
+  })
+  expect(result.code).toBe(1)
+  expect(readVault(sandbox).calls).toEqual([])
 })

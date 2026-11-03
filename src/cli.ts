@@ -2,6 +2,7 @@
 import { parseArgs, USAGE, type ParsedArgs } from './args'
 import { runAdd } from './commands/add'
 import { runList } from './commands/list'
+import { runRm } from './commands/rm'
 import { runSync } from './commands/sync'
 import { runUpdate } from './commands/update'
 import { contextFromProcess, type Context } from './context'
@@ -22,7 +23,7 @@ const HANDLERS = new Map<string, Handler>([
   ['sync', runSync],
   ['add', runAdd],
   ['update', runUpdate],
-  ['rm', notImplemented],
+  ['rm', runRm],
   ['list', runList],
   ['is-secret', notImplemented],
   ['hook', notImplemented],
