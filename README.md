@@ -94,7 +94,7 @@ Hook it into Claude Code, in `~/.claude/settings.json`:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|NotebookEdit|Grep|Bash",
+        "matcher": "Read|Edit|MultiEdit|Write|NotebookEdit|Grep|Bash",
         "hooks": [{ "type": "command", "command": "bwenv hook claude" }]
       }
     ]
