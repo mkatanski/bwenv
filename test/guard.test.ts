@@ -271,3 +271,35 @@ describe('search parsing fails closed', () => {
     expect(judgeBash('rg X src', local)).toBeNull()
   })
 })
+
+describe('search parsing, second round', () => {
+  for (const command of [
+    'grep --regex=X .env',
+    'grep --fi=patterns.txt .env',
+    'grep -d recurse X .',
+    'grep --directories=recurse X .',
+    'grep -2r X .',
+    'rg -g * X .',
+    'rg --glob=x X .',
+    'rg --iglob x X .',
+  ]) {
+    test(`denies ${command}`, () => {
+      expect(judgeBash(command, ctx)).not.toBeNull()
+    })
+  }
+
+  test('the tree walk fails closed past its depth limit', () => {
+    const deep = join(ctx.cwd, 'tree', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+    mkdirSync(deep, { recursive: true })
+    writeFileSync(join(deep, 'notes.md'), 'nothing\n')
+    expect(judgeBash('grep -rn X tree', ctx)).not.toBeNull()
+  })
+
+  test('the tree walk follows a symlinked directory', () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'bwenv-linked-'))
+    writeFileSync(join(elsewhere, '.env'), 'X=1\n')
+    mkdirSync(join(ctx.cwd, 'holder'))
+    symlinkSync(elsewhere, join(ctx.cwd, 'holder', 'linked'))
+    expect(judgeBash('grep -Rn X holder', ctx)).not.toBeNull()
+  })
+})

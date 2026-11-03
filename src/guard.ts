@@ -262,8 +262,21 @@ interface Search {
 }
 
 function isShortCluster(arg: string): boolean {
-  return /^-[A-Za-z.]+$/.test(arg)
+  return /^-[A-Za-z0-9.]+$/.test(arg)
 }
+
+function isLongPrefix(option: string, full: string): boolean {
+  return option.length >= 3 && full.startsWith(option)
+}
+
+function namesPatternOption(option: string): boolean {
+  if (option.startsWith('--')) {
+    return isLongPrefix(option, '--regexp') || isLongPrefix(option, '--file')
+  }
+  return isShortCluster(option) && /[ef]/.test(option)
+}
+
+const GLOB_OPTIONS = new Set(['-g', '--glob', '--iglob'])
 
 function readsHiddenAndIgnored(command: string, option: string): boolean {
   if (GREP_FAMILY.has(command)) {
@@ -298,13 +311,19 @@ function parseSearch(command: string, args: string[]): Search {
     }
     const equals = arg.indexOf('=')
     const option = equals === -1 ? arg : arg.slice(0, equals)
+    const value = equals === -1 ? args[index + 1] : arg.slice(equals + 1)
     if (readsHiddenAndIgnored(command, option)) readsEverything = true
+    if (GLOB_OPTIONS.has(option)) readsEverything = true
+    if (
+      (option === '-d' || isLongPrefix(option, '--directories')) &&
+      value === 'recurse'
+    ) {
+      readsEverything = true
+    }
     if (!modelled) continue
     if (equals !== -1) {
-      if (!PATTERN_VALUE.has(option)) checked.push(arg.slice(equals + 1))
-      if (PATTERN_VALUE.has(option) || FILE_VALUE.has(option)) {
-        patternInOption = true
-      }
+      checked.push(arg.slice(equals + 1))
+      if (namesPatternOption(option)) patternInOption = true
       continue
     }
     if (PATTERN_VALUE.has(arg)) {
@@ -339,6 +358,16 @@ function isVisibleFrom(parent: string, child: string): boolean {
     .every((segment) => !segment.startsWith('.'))
 }
 
+function isDirectoryEntry(entry: Dirent, path: string): boolean {
+  if (entry.isDirectory()) return true
+  if (!entry.isSymbolicLink()) return false
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 function treeHasBuiltInSecret(root: string): boolean {
   let seen = 0
   const stack: [string, number][] = [[root, 0]]
@@ -353,13 +382,10 @@ function treeHasBuiltInSecret(root: string): boolean {
     for (const entry of entries) {
       seen++
       if (seen > WALK_LIMIT || isBuiltInSecretName(entry.name)) return true
-      if (
-        entry.isDirectory() &&
-        !WALK_SKIP.has(entry.name) &&
-        depth < WALK_DEPTH
-      ) {
-        stack.push([join(dir, entry.name), depth + 1])
-      }
+      const path = join(dir, entry.name)
+      if (WALK_SKIP.has(entry.name) || !isDirectoryEntry(entry, path)) continue
+      if (depth >= WALK_DEPTH) return true
+      stack.push([path, depth + 1])
     }
   }
   return false
