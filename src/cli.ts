@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs, USAGE, type ParsedArgs } from './args'
 import { runAdd } from './commands/add'
+import { runHook, runIsSecret } from './commands/guard'
 import { runList } from './commands/list'
 import { runRm } from './commands/rm'
 import { runSync } from './commands/sync'
@@ -9,10 +10,6 @@ import { contextFromProcess, type Context } from './context'
 import { BwenvError } from './errors'
 
 type Handler = (ctx: Context, args: ParsedArgs) => Promise<number>
-
-function notImplemented(): Promise<number> {
-  throw new BwenvError('not implemented yet', 2)
-}
 
 function help(ctx: Context): Promise<number> {
   ctx.stdout.write(`${USAGE}\n`)
@@ -25,8 +22,8 @@ const HANDLERS = new Map<string, Handler>([
   ['update', runUpdate],
   ['rm', runRm],
   ['list', runList],
-  ['is-secret', notImplemented],
-  ['hook', notImplemented],
+  ['is-secret', runIsSecret],
+  ['hook', runHook],
   ['help', help],
 ])
 

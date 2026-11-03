@@ -17,7 +17,7 @@ const ENTER = new Set(['\r', '\n'])
 const CTRL_C = '\u0003'
 const BACKSPACE = new Set(['\u007f', '\b'])
 
-async function readAll(stream: Readable): Promise<string> {
+export async function readStream(stream: Readable): Promise<string> {
   const decoder = new TextDecoder()
   let text = ''
   for await (const chunk of stream as AsyncIterable<unknown>) {
@@ -72,7 +72,7 @@ export async function readValue(
   if (ctx.isTTY && isRawStream(ctx.stdin)) {
     return hiddenPrompt(label, ctx.stdin, ctx.stderr)
   }
-  const text = await readAll(ctx.stdin)
+  const text = await readStream(ctx.stdin)
   return text.replace(/\r?\n$/, '')
 }
 
