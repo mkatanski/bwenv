@@ -74,13 +74,19 @@ const AGENTS_NO_BW =
   'Agents do not use the Bitwarden CLI. Ask the owner, or use: bwenv list'
 
 function isBuiltInSecretName(name: string): boolean {
-  if (name === '.env.example') return false
+  const lower = name.toLowerCase()
+  if (lower === '.env.example') return false
   return (
-    name === '.env' ||
-    name.startsWith('.env.') ||
-    name === '.dev.vars' ||
-    name.startsWith('.dev.vars.')
+    lower === '.env' ||
+    lower.startsWith('.env.') ||
+    lower === '.dev.vars' ||
+    lower.startsWith('.dev.vars.')
   )
+}
+
+function globTargetsSecrets(glob: string): boolean {
+  const last = glob.split('/').at(-1) ?? glob
+  return isBuiltInSecretName(last.replaceAll('*', '.x'))
 }
 
 function expandHome(path: string, home: string): string {
@@ -134,9 +140,10 @@ function stateFiles(statePath: string): string[] {
 export function isSecretPath(path: string, ctx: GuardContext): boolean {
   const expanded = expandHome(path, ctx.home)
   const absolute = isAbsolute(expanded) ? expanded : resolve(ctx.cwd, expanded)
-  if (isBuiltInSecretName(basename(absolute))) return true
-
   const target = canonical(absolute)
+  if (isBuiltInSecretName(basename(absolute))) return true
+  if (isBuiltInSecretName(basename(target))) return true
+
   const known = [
     ...stateFiles(ctx.statePath),
     ...manifestFiles(findManifest(ctx.cwd), ctx.home),
@@ -261,15 +268,19 @@ export function judgeToolCall(
   switch (call.tool_name) {
     case 'Read':
     case 'Edit':
+    case 'MultiEdit':
     case 'Write':
       path = pathField(input, 'file_path')
       break
     case 'NotebookEdit':
       path = pathField(input, 'notebook_path')
       break
-    case 'Grep':
+    case 'Grep': {
+      const glob = pathField(input, 'glob')
+      if (glob !== null && globTargetsSecrets(glob)) return secretDenial(glob)
       path = pathField(input, 'path')
       break
+    }
     case 'Bash': {
       const command = pathField(input, 'command')
       return command === null ? null : judgeBash(command, guard)

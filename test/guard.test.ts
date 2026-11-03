@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -161,4 +161,45 @@ test('a broken manifest does not break the guard', () => {
   const broken = { ...ctx, cwd: join(root, 'sub') }
   expect(isSecretPath('README.md', broken)).toBe(false)
   expect(isSecretPath('.env', broken)).toBe(true)
+})
+
+describe('judgeToolCall closes the obvious side doors', () => {
+  test('a symlink to a secret file and an upper-case name are both denied', () => {
+    writeFileSync(join(ctx.cwd, '.dev.vars'), 'A=1\n')
+    symlinkSync(join(ctx.cwd, '.dev.vars'), join(ctx.cwd, 'notes.txt'))
+    for (const file_path of [
+      join(ctx.cwd, 'notes.txt'),
+      join(ctx.cwd, '.ENV'),
+    ]) {
+      expect(
+        judgeToolCall({ tool_name: 'Read', tool_input: { file_path } }, ctx),
+      ).not.toBeNull()
+    }
+  })
+
+  test('MultiEdit is covered like Edit', () => {
+    expect(
+      judgeToolCall(
+        { tool_name: 'MultiEdit', tool_input: { file_path: '.env' } },
+        ctx,
+      ),
+    ).not.toBeNull()
+  })
+
+  test('Grep with a glob aimed at secret files is denied', () => {
+    for (const glob of ['.env*', '**/.dev.vars', '.env.local']) {
+      expect(
+        judgeToolCall(
+          { tool_name: 'Grep', tool_input: { pattern: 'X', glob } },
+          ctx,
+        ),
+      ).not.toBeNull()
+    }
+    expect(
+      judgeToolCall(
+        { tool_name: 'Grep', tool_input: { pattern: 'X', glob: '*.ts' } },
+        ctx,
+      ),
+    ).toBeNull()
+  })
 })
