@@ -12,6 +12,7 @@ import {
   type LoadedManifest,
   type VariableSpec,
 } from '../manifest'
+import { fileFlag } from '../shell'
 import { loadState, type State } from '../state'
 
 type Lookup = (
@@ -73,13 +74,12 @@ async function vaultLookup(
   args: ParsedArgs,
   loaded: LoadedManifest,
   state: State,
+  groups: FileGroup[],
 ): Promise<Lookup> {
-  const fileFlag =
-    args.flags.file === undefined ? '' : ` --file ${args.flags.file}`
   const vault = await openVault({
     env: ctx.env,
     isTTY: ctx.isTTY,
-    ownerCommand: `bwenv list --vault${fileFlag}`,
+    ownerCommand: `bwenv list --vault${fileFlag(args.flags.file, groups)}`,
     stderr: ctx.stderr,
   })
   const { project } = loaded.manifest
@@ -106,7 +106,7 @@ export async function runList(ctx: Context, args: ParsedArgs): Promise<number> {
   const state = loadState(ctx.statePath)
   const groups = groupByFile(loaded, ctx.home, args.flags.file)
   const lookup = args.flags.vault
-    ? await vaultLookup(ctx, args, loaded, state)
+    ? await vaultLookup(ctx, args, loaded, state, groups)
     : null
   const blocks = groups.map((group) =>
     describeGroup(group, state, lookup).join('\n'),

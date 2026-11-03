@@ -240,3 +240,17 @@ test('sync refuses an agent', async () => {
   expect(result.stderr).toContain('does not open the vault for an agent')
   expect(readVault(sandbox).calls).toEqual([])
 })
+
+test('the command suggested to the owner never echoes raw --file text', async () => {
+  const sandbox = makeSandbox(MANIFEST)
+  const tricky = 'a;touch pwned;b/../.dev.vars'
+  for (const args of [
+    ['sync', '--file', tricky],
+    ['list', '--vault', '--file', tricky],
+  ]) {
+    const result = await runCli(sandbox, args, { env: { CLAUDECODE: '1' } })
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('--file .dev.vars')
+    expect(result.stderr).not.toContain('touch pwned')
+  }
+})

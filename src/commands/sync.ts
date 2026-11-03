@@ -12,6 +12,7 @@ import {
   type VariableSpec,
 } from '../manifest'
 import { loadState, recordValues, saveState, type State } from '../state'
+import { fileFlag } from '../shell'
 import { decideSync } from '../sync-plan'
 
 interface SyncRun {
@@ -112,12 +113,10 @@ function syncGroup(group: FileGroup, run: SyncRun): GroupResult {
   return { lines, attention }
 }
 
-function ownerCommand(args: ParsedArgs): string {
-  const parts = ['bwenv sync']
-  if (args.flags.env !== undefined) parts.push(`--env ${args.flags.env}`)
-  if (args.flags.file !== undefined) parts.push(`--file ${args.flags.file}`)
-  if (args.flags.force) parts.push('--force')
-  return parts.join(' ')
+function ownerCommand(args: ParsedArgs, groups: FileGroup[]): string {
+  const env = args.flags.env === undefined ? '' : ` --env ${args.flags.env}`
+  const force = args.flags.force ? ' --force' : ''
+  return `bwenv sync${env}${fileFlag(args.flags.file, groups)}${force}`
 }
 
 export async function runSync(ctx: Context, args: ParsedArgs): Promise<number> {
@@ -139,7 +138,7 @@ export async function runSync(ctx: Context, args: ParsedArgs): Promise<number> {
   const vault = await openVault({
     env: ctx.env,
     isTTY: ctx.isTTY,
-    ownerCommand: ownerCommand(args),
+    ownerCommand: ownerCommand(args, groups),
     stderr: ctx.stderr,
   })
   const project = loaded.manifest.project
