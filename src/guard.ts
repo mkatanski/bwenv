@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import {
   basename,
   dirname,
@@ -6,6 +6,7 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from 'node:path'
 
 import { BwenvError } from './errors'
@@ -230,6 +231,132 @@ function secretDenial(path: string): string {
   return `${path} holds secrets. Use: bwenv list (names only, no values)`
 }
 
+const GREP_FAMILY = new Set(['grep', 'egrep', 'fgrep', 'zgrep', 'rgrep'])
+const RIPGREPS = new Set(['rg', 'ag'])
+const PATTERN_OPTIONS = new Set(['-e', '-f', '--regexp', '--file'])
+const GREP_VALUE_OPTIONS = new Set([
+  '-e',
+  '-f',
+  '-m',
+  '-A',
+  '-B',
+  '-C',
+  '-d',
+  '-D',
+])
+const RIPGREP_VALUE_OPTIONS = new Set([
+  '-e',
+  '-f',
+  '-m',
+  '-A',
+  '-B',
+  '-C',
+  '-g',
+  '-t',
+  '-T',
+  '-r',
+  '-M',
+  '-j',
+  '-G',
+])
+const UNRESTRICTED = new Set([
+  '--hidden',
+  '--no-ignore',
+  '--unrestricted',
+  '--skip-vcs-ignores',
+])
+
+interface Search {
+  operands: string[]
+  readsEverything: boolean
+}
+
+function isShortCluster(arg: string): boolean {
+  return /^-[A-Za-z.]+$/.test(arg)
+}
+
+function parseSearch(command: string, args: string[]): Search {
+  const grep = GREP_FAMILY.has(command)
+  const valueOptions = grep ? GREP_VALUE_OPTIONS : RIPGREP_VALUE_OPTIONS
+  let readsEverything = command === 'rgrep'
+  let patternGiven = false
+  const positionals: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index] ?? ''
+    if (arg === '--') {
+      positionals.push(...args.slice(index + 1))
+      break
+    }
+    if (!arg.startsWith('-') || arg === '-') {
+      positionals.push(arg)
+      continue
+    }
+    const option = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg
+    if (PATTERN_OPTIONS.has(option)) patternGiven = true
+    if (grep) {
+      if (
+        option === '--recursive' ||
+        option === '--dereference-recursive' ||
+        (isShortCluster(arg) && /[rR]/.test(arg))
+      ) {
+        readsEverything = true
+      }
+    } else if (
+      UNRESTRICTED.has(option) ||
+      (isShortCluster(arg) && /[uU.]/.test(arg))
+    ) {
+      readsEverything = true
+    }
+    if (valueOptions.has(arg)) index++
+  }
+  return {
+    operands: patternGiven ? positionals : positionals.slice(1),
+    readsEverything,
+  }
+}
+
+function isInsideDir(parent: string, child: string): boolean {
+  const path = relative(parent, child)
+  return (
+    path !== '' &&
+    path !== '..' &&
+    !path.startsWith(`..${sep}`) &&
+    !isAbsolute(path)
+  )
+}
+
+function dirHoldsSecrets(dir: string, ctx: GuardContext): boolean {
+  const absolute = canonical(isAbsolute(dir) ? dir : resolve(ctx.cwd, dir))
+  if (!existsSync(absolute) || !statSync(absolute).isDirectory()) return false
+  const known = [
+    ...stateFiles(ctx.statePath),
+    ...manifestFiles(findManifest(ctx.cwd), ctx.home),
+    ...manifestFiles(findManifest(absolute), ctx.home),
+  ]
+  if (known.some((path) => isInsideDir(absolute, path))) return true
+  return readdirSync(absolute).some(isBuiltInSecretName)
+}
+
+function judgeSearch(
+  command: string,
+  args: string[],
+  ctx: GuardContext,
+): string | null {
+  const { operands, readsEverything } = parseSearch(command, args)
+  for (const operand of operands) {
+    if (isSecretPath(expandWord(operand, ctx.home), ctx)) {
+      return secretDenial(operand)
+    }
+  }
+  if (!readsEverything) return null
+  for (const dir of operands.length === 0 ? ['.'] : operands) {
+    if (dirHoldsSecrets(expandWord(dir, ctx.home), ctx)) {
+      return `${dir} holds secret files and this search would print them. Use: git grep (it skips ignored files), or bwenv list`
+    }
+  }
+  return null
+}
+
 export function judgeBash(command: string, ctx: GuardContext): string | null {
   for (const segment of tokenize(command)) {
     for (const target of segment.redirects) {
@@ -240,6 +367,11 @@ export function judgeBash(command: string, ctx: GuardContext): string | null {
     const start = commandIndex(segment.words)
     const name = basename(segment.words[start] ?? '')
     if (name === 'bw') return AGENTS_NO_BW
+    if (GREP_FAMILY.has(name) || RIPGREPS.has(name)) {
+      const denial = judgeSearch(name, segment.words.slice(start + 1), ctx)
+      if (denial !== null) return denial
+      continue
+    }
     if (!READERS.has(name)) continue
     for (const arg of segment.words.slice(start + 1)) {
       const equals = arg.startsWith('--') ? arg.indexOf('=') : -1

@@ -103,7 +103,8 @@ Hook it into Claude Code, in `~/.claude/settings.json`:
 ```
 
 The hook blocks reading or editing a secret file, along with any shell command that reads one
-(`cat`, `grep`, `cp`, redirections and the like) or calls `bw`. It lets through `.`/`source`,
+(`cat`, `grep`, `cp`, redirections and the like), a recursive `grep` (or `rg --hidden`/`-u`) over a
+directory that holds one (use `git grep`, which skips ignored files), or calls `bw`. It lets through `.`/`source`,
 `bun --env-file`, `ls`, `test -f`, `git check-ignore` and `bwenv` itself.
 
 A path counts as secret if it is:

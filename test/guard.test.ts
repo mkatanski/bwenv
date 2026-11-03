@@ -203,3 +203,36 @@ describe('judgeToolCall closes the obvious side doors', () => {
     ).toBeNull()
   })
 })
+
+describe('recursive searches', () => {
+  for (const command of [
+    'grep -rn API_KEY .',
+    'grep -rn API_KEY',
+    'grep -R X',
+    'grep --recursive X .',
+    'egrep KEY .env',
+    'rgrep X .',
+    'grep -e X .dev.vars',
+    'rg --hidden --no-ignore X',
+    'rg -uu X .',
+  ]) {
+    test(`denies ${command}`, () => {
+      expect(judgeBash(command, ctx)).not.toBeNull()
+    })
+  }
+  for (const command of [
+    "grep -rn '.dev.vars' docs/",
+    "grep -n '.dev.vars' README.md",
+    'grep -e .env README.md',
+    'grep -rn X src',
+    'rg X .',
+    'rg -r replacement X src',
+  ]) {
+    test(`allows ${command}`, () => {
+      expect(judgeBash(command, ctx)).toBeNull()
+    })
+  }
+  test('the denial suggests git grep', () => {
+    expect(judgeBash('grep -rn API_KEY .', ctx)).toContain('git grep')
+  })
+})
